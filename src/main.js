@@ -69,6 +69,7 @@
     settingsMsg: $("#settingsMsg"),
     dataDirText: $("#dataDirText"),
     imagesDirText: $("#imagesDirText"),
+    windowMaterial: $("#windowMaterial"),
     alwaysOnTopToggle: $("#alwaysOnTopToggle"),
     noteTitle: $("#noteTitle"),
     preview: $("#preview"),
@@ -112,6 +113,7 @@
       imagesDir: "",
       alwaysOnTop: false,
       theme: "sakura",
+      windowMaterial: "none",
     },
   };
 
@@ -1238,6 +1240,13 @@
     root.style.colorScheme = selected.colorScheme || "light";
   }
 
+  function applyWindowAppearance() {
+    const materials = ["none", "auto", "mica", "acrylic", "micaAlt"];
+    document.documentElement.dataset.windowMaterial = materials.includes(state.settings.windowMaterial)
+      ? state.settings.windowMaterial
+      : "none";
+  }
+
   async function loadThemes() {
     if (invoke) {
       try {
@@ -1286,6 +1295,7 @@
   function renderSettings() {
     els.dataDirText.textContent = state.settings.dataDir || "—";
     els.imagesDirText.textContent = state.settings.imagesDir || "—";
+    els.windowMaterial.value = state.settings.windowMaterial || "none";
     els.alwaysOnTopToggle.setAttribute(
       "aria-checked",
       String(!!state.settings.alwaysOnTop)
@@ -1295,6 +1305,7 @@
 
   function openSettings() {
     settingsOpen = true;
+    document.body.classList.add("settings-open");
     closeNoteList();
     els.settingsMsg.textContent = "";
     renderSettings();
@@ -1305,6 +1316,7 @@
   function closeSettings() {
     if (!settingsOpen) return;
     settingsOpen = false;
+    document.body.classList.remove("settings-open");
     els.settingsPane.classList.add("hidden");
   }
 
@@ -1315,11 +1327,16 @@
       alwaysOnTop:
         patch.alwaysOnTop !== undefined ? patch.alwaysOnTop : state.settings.alwaysOnTop,
       theme: patch.theme !== undefined ? patch.theme : state.settings.theme,
+      windowMaterial:
+        patch.windowMaterial !== undefined
+          ? patch.windowMaterial
+          : state.settings.windowMaterial,
     };
 
     if (!invoke) {
       state.settings = next;
       applyTheme(state.settings.theme);
+      applyWindowAppearance();
       renderSettings();
       return true;
     }
@@ -1327,6 +1344,7 @@
     try {
       const resolved = await invoke("update_settings", { settings: next });
       state.settings = resolved;
+      applyWindowAppearance();
       pinned = !!resolved.alwaysOnTop;
       $("#pinBtn").classList.toggle("on", pinned);
       $("#pinBtn").title = pinned ? "取消置顶" : "窗口置顶";
@@ -1517,6 +1535,12 @@
     $("#importBackup").addEventListener("click", importBackup);
     $("#exportTheme").addEventListener("click", exportCurrentTheme);
     $("#importTheme").addEventListener("click", importTheme);
+
+    els.windowMaterial.addEventListener("change", async () => {
+      if (await updateSettings({ windowMaterial: els.windowMaterial.value })) {
+        els.settingsMsg.textContent = "窗口材质已更新。";
+      }
+    });
 
     $("#themeList").addEventListener("click", async (event) => {
       const item = event.target.closest(".theme-item");
@@ -1786,6 +1810,7 @@
     }
 
     await loadThemes();
+    applyWindowAppearance();
     $("#pinBtn").classList.toggle("on", pinned);
     $("#pinBtn").title = pinned ? "取消置顶" : "窗口置顶";
 

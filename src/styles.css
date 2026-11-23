@@ -212,10 +212,15 @@ svg {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  border-radius: 18px;
+  border-radius: 8px;
   border: 1px solid var(--stroke);
   background: var(--app-bg);
-  box-shadow: var(--shadow);
+  background-clip: padding-box;
+}
+
+:root[data-window-material]:not([data-window-material="none"]) .app,
+:root[data-window-material]:not([data-window-material="none"]) .settings-pane {
+  background: transparent;
 }
 
 .app::after {
@@ -1015,7 +1020,11 @@ body.dragging .app::after {
   opacity: 0.7;
 }
 
-/* 设置面板 */
+/* 设置面板：透明材质下不再显示底层笔记/待办，避免内容重叠。 */
+body.settings-open .pane {
+  visibility: hidden;
+}
+
 .settings-pane {
   position: absolute;
   inset: 0;
@@ -1106,6 +1115,25 @@ body.dragging .app::after {
   display: flex;
   gap: 8px;
   margin-top: 2px;
+}
+
+.setting-select {
+  width: 100%;
+  padding: 7px 9px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  outline: none;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+}
+
+.setting-select:focus {
+  border-color: var(--plum-2);
+}
+
+.setting-select option {
+  background: var(--popover-bg);
 }
 
 .btn-soft {

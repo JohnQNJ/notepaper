@@ -16,7 +16,9 @@
 - **自动保存**：输入后 450ms 防抖写入本地 JSON，`Ctrl+S` 立即保存
 - **存储位置可配置**：数据目录、图片目录均可在设置中更改，切换数据目录时自动迁移已有数据
 - **窗口置顶**：标题栏一键置顶，可设置启动时自动置顶
-- **无边框圆角窗口**：透明背景 + CSS 圆角，拖动标题栏移动，支持缩放、最小化、关闭
+- **窗口状态记忆**：正常关闭时记录窗口位置和大小，下次启动自动恢复
+- **Windows 窗口材质**：支持自动、无、Mica、Acrylic、Mica Alt，旧系统自动回退，原生明暗随主题同步
+- **无边框圆角窗口**：DWM 原生阴影 + Windows 11 原生圆角，拖动标题栏移动，支持缩放、最小化、关闭
 - **完全离线**：无网络请求，无云同步，数据只在本机
 
 ## 技术栈
@@ -47,8 +49,8 @@ npm run build
 
 产物位于：
 
-- `src-tauri/target/release/bundle/nsis/notepaper_0.1.0_x64-setup.exe`（NSIS 安装包，推荐）
-- `src-tauri/target/release/bundle/msi/notepaper_0.1.0_x64_en-US.msi`（MSI 安装包）
+- `src-tauri/target/release/bundle/nsis/notepaper_0.2.0_x64-setup.exe`（NSIS 安装包，推荐）
+- `src-tauri/target/release/bundle/msi/notepaper_0.2.0_x64_en-US.msi`（MSI 安装包）
 - `src-tauri/target/release/notepaper.exe`（免安装可执行文件）
 
 安装包未做代码签名，首次安装时 Windows SmartScreen 可能提示"未知发布者"，点"更多信息 → 仍要运行"即可。
@@ -58,6 +60,7 @@ npm run build
 | 内容 | 默认位置 |
 | --- | --- |
 | 应用设置 | `%APPDATA%\com.notepaper.sticky\settings.json` |
+| 窗口位置与大小 | `%APPDATA%\com.notepaper.sticky\window.json` |
 | 笔记与待办 | `%APPDATA%\com.notepaper.sticky\data.json` |
 | 粘贴的截图 | `%APPDATA%\com.notepaper.sticky\images\` |
 | 主题 | `%APPDATA%\com.notepaper.sticky\themes\*.json` |
@@ -65,6 +68,7 @@ npm run build
 在应用右上角齿轮进入设置：
 
 - **主题**：粉樱（默认）、暗夜、薄荷、素纸。主题 JSON 可直接编辑，也可单独导入导出；变量同时控制整窗配色、控件样式、字体与 Markdown 预览，详见 [自定义主题](docs/THEMES.md)
+- **窗口材质**：选择自动、无、Mica、Acrylic 或 Mica Alt；系统直接绘制原生背景，不使用背景图片，详见 [Windows 窗口材质](docs/WINDOW_MATERIALS.md)
 - **数据存储位置**：选择任意可写目录。切换时会迁移已有 `data.json` 和主题文件（不覆盖目标已有文件），并把当前内容写入新位置
 - **图片存储位置**：截图可以保存到任意磁盘目录；保存在数据目录内时，Markdown 中使用 `images/xxx.png` 这样的相对路径；目录在数据目录外时退化为绝对路径
 - **数据备份**：导出 zip（`data.json` + `themes/**` + 数据目录内的图片 + `manifest.json`），导入时覆盖当前数据并自动保留 `data.json.bak`
@@ -129,6 +133,8 @@ notepaper/
 │  └─ tauri.conf.json
 ├─ docs/TECHNICAL.md        # 技术设计文档
 ├─ docs/THEMES.md           # 自定义主题与可编辑变量说明
+├─ docs/WINDOW_MATERIALS.md # Tauri Windows 材质调研与实现说明
+├─ docs/DEBUGGING.md        # CDP、DWM、真实截图与持久化调试手册
 ├─ package.json
 └─ README.md
 ```
@@ -144,4 +150,4 @@ notepaper/
 
 ## 更多文档
 
-架构、数据模型、IPC 命令、构建细节等见 [docs/TECHNICAL.md](docs/TECHNICAL.md)；主题 JSON 格式与变量说明见 [docs/THEMES.md](docs/THEMES.md)。
+架构、数据模型、IPC 命令、构建细节等见 [docs/TECHNICAL.md](docs/TECHNICAL.md)；主题 JSON 格式与变量说明见 [docs/THEMES.md](docs/THEMES.md)；DWM 材质原理与版本回退见 [docs/WINDOW_MATERIALS.md](docs/WINDOW_MATERIALS.md)；CDP、DWM、真实截图和持久化排查方法见 [docs/DEBUGGING.md](docs/DEBUGGING.md)。

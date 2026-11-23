@@ -109,6 +109,18 @@
             </div>
 
             <div class="setting-card">
+              <div class="setting-label">窗口材质</div>
+              <div class="setting-desc">Windows 11 使用 DWM 系统背景；旧版本自动使用兼容的 Mica、Acrylic 或 Blur。</div>
+              <select id="windowMaterial" class="setting-select">
+                <option value="none">无背景样式</option>
+                <option value="auto">自动（系统默认）</option>
+                <option value="mica">云母 Mica</option>
+                <option value="acrylic">亚克力 Acrylic</option>
+                <option value="micaAlt">云母 Alt（Mica Alt）</option>
+              </select>
+            </div>
+
+            <div class="setting-card">
               <div class="setting-label">数据存储位置</div>
               <div class="setting-desc">笔记与待办以 data.json 保存在此目录，切换时会自动迁移已有数据。</div>
               <div id="dataDirText" class="setting-path">—</div>
@@ -149,7 +161,7 @@
 
             <div class="settings-bottom">
               <button id="resetDirs" class="link-btn">恢复默认路径</button>
-              <span class="settings-version">小便签 v0.1.0</span>
+              <span class="settings-version">小便签 v0.2.0</span>
             </div>
             <div id="settingsMsg" class="settings-msg"></div>
           </div>

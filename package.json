@@ -1,7 +1,7 @@
 {
   "name": "notepaper",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "一个 Tauri + Rust 写的桌面小便签",
   "scripts": {
     "dev": "tauri dev",

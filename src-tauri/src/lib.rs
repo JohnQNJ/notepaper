@@ -37,13 +37,36 @@ struct Store {
 }
 
 /// 用户设置。目录为空字符串表示使用默认位置。
-#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 struct Settings {
     data_dir: String,
     images_dir: String,
     always_on_top: bool,
     theme: String,
+    window_material: String,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Self {
+            data_dir: String::new(),
+            images_dir: String::new(),
+            always_on_top: false,
+            theme: String::new(),
+            window_material: "none".to_string(),
+        }
+    }
+}
+
+/// 上次正常关闭时的窗口位置与内层大小，均使用物理像素。
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct WindowState {
+    x: i32,
+    y: i32,
+    width: u32,
+    height: u32,
 }
 
 /// 返回给前端的设置，路径均为解析后的绝对路径。
@@ -54,6 +77,7 @@ struct ResolvedSettings {
     images_dir: String,
     always_on_top: bool,
     theme: String,
+    window_material: String,
 }
 
 /// 保存图片的结果。relative 为相对于数据目录的路径（图片在数据目录内时可用）。
@@ -136,6 +160,261 @@ fn read_settings(app: &tauri::AppHandle) -> Settings {
         .unwrap_or_default()
 }
 
+fn window_state_file(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    Ok(app_dir(app)?.join("window.json"))
+}
+
+fn read_window_state(app: &tauri::AppHandle) -> Option<WindowState> {
+    let state: WindowState = window_state_file(app)
+        .ok()
+        .and_then(|path| fs::read_to_string(path).ok())
+        .and_then(|raw| serde_json::from_str(&raw).ok())?;
+    (state.width > 0 && state.height > 0 && state.width <= 16_384 && state.height <= 16_384)
+        .then_some(state)
+}
+
+fn window_center_is_visible(window: &tauri::WebviewWindow, state: &WindowState) -> bool {
+    let center_x = i64::from(state.x) + i64::from(state.width / 2);
+    let center_y = i64::from(state.y) + i64::from(state.height / 2);
+    window
+        .available_monitors()
+        .map(|monitors| {
+            monitors.iter().any(|monitor| {
+                let origin = monitor.position();
+                let size = monitor.size();
+                let left = i64::from(origin.x);
+                let top = i64::from(origin.y);
+                center_x >= left
+                    && center_x < left + i64::from(size.width)
+                    && center_y >= top
+                    && center_y < top + i64::from(size.height)
+            })
+        })
+        .unwrap_or(false)
+}
+
+fn restore_window_state(window: &tauri::WebviewWindow) {
+    let Some(state) = read_window_state(window.app_handle()) else {
+        return;
+    };
+    if window
+        .set_size(tauri::PhysicalSize::new(state.width, state.height))
+        .is_err()
+    {
+        return;
+    }
+    if window_center_is_visible(window, &state) {
+        let _ = window.set_position(tauri::PhysicalPosition::new(state.x, state.y));
+    } else {
+        // 原显示器可能已断开，保留大小并回到当前可用屏幕中央。
+        let _ = window.center();
+    }
+}
+
+fn save_window_state(window: &tauri::Window) -> Result<(), String> {
+    if window.is_minimized().unwrap_or(false) {
+        return Ok(());
+    }
+    let position = window.outer_position().map_err(|err| err.to_string())?;
+    let size = window.inner_size().map_err(|err| err.to_string())?;
+    if size.width == 0 || size.height == 0 {
+        return Ok(());
+    }
+    let state = WindowState {
+        x: position.x,
+        y: position.y,
+        width: size.width,
+        height: size.height,
+    };
+    let path = window_state_file(window.app_handle())?;
+    if let Some(dir) = path.parent() {
+        fs::create_dir_all(dir).map_err(|err| err.to_string())?;
+    }
+    let raw = serde_json::to_string_pretty(&state).map_err(|err| err.to_string())?;
+    fs::write(path, raw).map_err(|err| format!("保存窗口状态失败：{err}"))
+}
+
+fn normalize_window_material(value: &str) -> String {
+    match value.trim() {
+        "auto" => "auto".to_string(),
+        "mica" => "mica".to_string(),
+        "acrylic" => "acrylic".to_string(),
+        "micaAlt" => "micaAlt".to_string(),
+        _ => "none".to_string(),
+    }
+}
+
+#[cfg(windows)]
+mod dwm_material {
+    use std::ffi::c_void;
+
+    #[repr(C)]
+    #[allow(dead_code)]
+    struct OsVersionInfo {
+        size: u32,
+        major: u32,
+        minor: u32,
+        build: u32,
+        platform: u32,
+        service_pack: [u16; 128],
+    }
+
+    #[link(name = "ntdll")]
+    extern "system" {
+        fn RtlGetVersion(info: *mut OsVersionInfo) -> i32;
+    }
+
+    #[link(name = "dwmapi")]
+    extern "system" {
+        fn DwmSetWindowAttribute(
+            hwnd: *mut c_void,
+            attribute: u32,
+            value: *const c_void,
+            size: u32,
+        ) -> i32;
+    }
+
+    pub fn build_number() -> u32 {
+        let mut info = OsVersionInfo {
+            size: std::mem::size_of::<OsVersionInfo>() as u32,
+            major: 0,
+            minor: 0,
+            build: 0,
+            platform: 0,
+            service_pack: [0; 128],
+        };
+        let status = unsafe { RtlGetVersion(&mut info) };
+        if status == 0 {
+            info.build
+        } else {
+            0
+        }
+    }
+
+    fn set_attribute(
+        window: &tauri::WebviewWindow,
+        attribute: u32,
+        value: u32,
+        name: &str,
+    ) -> Result<(), String> {
+        let hwnd = window.hwnd().map_err(|err| err.to_string())?.0;
+        let result = unsafe {
+            DwmSetWindowAttribute(
+                hwnd,
+                attribute,
+                &value as *const _ as *const c_void,
+                std::mem::size_of::<u32>() as u32,
+            )
+        };
+        if result == 0 {
+            Ok(())
+        } else {
+            Err(format!("设置 DWM {name}失败：HRESULT 0x{:08X}", result))
+        }
+    }
+
+    pub fn set_backdrop(window: &tauri::WebviewWindow, backdrop: u32) -> Result<(), String> {
+        const DWMWA_SYSTEMBACKDROP_TYPE: u32 = 38;
+        set_attribute(window, DWMWA_SYSTEMBACKDROP_TYPE, backdrop, "窗口材质")
+    }
+
+    pub fn set_dark_mode(window: &tauri::WebviewWindow, dark: bool) -> Result<(), String> {
+        const DWMWA_USE_IMMERSIVE_DARK_MODE: u32 = 20;
+        set_attribute(
+            window,
+            DWMWA_USE_IMMERSIVE_DARK_MODE,
+            u32::from(dark),
+            "窗口明暗",
+        )
+    }
+
+    pub fn set_rounded_corners(window: &tauri::WebviewWindow) -> Result<(), String> {
+        const DWMWA_WINDOW_CORNER_PREFERENCE: u32 = 33;
+        const DWMWCP_ROUND: u32 = 2;
+        set_attribute(
+            window,
+            DWMWA_WINDOW_CORNER_PREFERENCE,
+            DWMWCP_ROUND,
+            "窗口圆角",
+        )
+    }
+}
+
+#[cfg(windows)]
+fn configure_window_frame(window: &tauri::WebviewWindow) -> Result<(), String> {
+    if dwm_material::build_number() >= 22_000 {
+        dwm_material::set_rounded_corners(window)?;
+    }
+    Ok(())
+}
+
+#[cfg(not(windows))]
+fn configure_window_frame(_window: &tauri::WebviewWindow) -> Result<(), String> {
+    Ok(())
+}
+
+fn theme_uses_dark(data_dir: &Path, theme_id: &str) -> bool {
+    let id = if theme_id.trim().is_empty() {
+        "sakura"
+    } else {
+        theme_id.trim()
+    };
+    read_theme(&data_dir.join("themes").join(format!("{id}.json")))
+        .map(|theme| theme.color_scheme == "dark")
+        .unwrap_or(false)
+}
+
+#[cfg(windows)]
+fn apply_window_material(
+    window: &tauri::WebviewWindow,
+    material: &str,
+    dark: bool,
+) -> Result<(), String> {
+    use tauri::window::{Effect, EffectsBuilder};
+
+    let build = dwm_material::build_number();
+    if build >= 22_523 {
+        // DWM 材质不会读取 WebView 的 CSS color-scheme，需同步原生窗口明暗。
+        dwm_material::set_dark_mode(window, dark)?;
+        let backdrop = match material {
+            "auto" => 0,
+            "mica" => 2,
+            "acrylic" => 3,
+            "micaAlt" => 4,
+            _ => 1,
+        };
+        return dwm_material::set_backdrop(window, backdrop);
+    }
+
+    if material == "none" {
+        return window.set_effects(None).map_err(|err| err.to_string());
+    }
+
+    let legacy = if build >= 17_763 {
+        Effect::Acrylic
+    } else {
+        Effect::Blur
+    };
+    let effect = match material {
+        "auto" | "mica" | "micaAlt" if build >= 22_000 => Effect::Mica,
+        "auto" | "mica" | "micaAlt" => legacy,
+        "acrylic" => legacy,
+        _ => return Ok(()),
+    };
+    window
+        .set_effects(EffectsBuilder::new().effect(effect).build())
+        .map_err(|err| err.to_string())
+}
+
+#[cfg(not(windows))]
+fn apply_window_material(
+    _window: &tauri::WebviewWindow,
+    _material: &str,
+    _dark: bool,
+) -> Result<(), String> {
+    Ok(())
+}
+
 /// 解析实际使用的目录：默认数据目录为应用数据目录，默认图片目录为 `<数据目录>/images`。
 fn resolve_settings(
     app: &tauri::AppHandle,
@@ -162,6 +441,7 @@ fn resolve_settings(
         } else {
             settings.theme.trim().to_string()
         },
+        window_material: normalize_window_material(&settings.window_material),
     };
 
     Ok((resolved, data_dir, images_dir))
@@ -189,23 +469,19 @@ fn get_settings(app: tauri::AppHandle) -> Result<ResolvedSettings, String> {
 /// 更新设置。切换数据目录时会把已有的 data.json 复制到新目录（不覆盖已有文件），
 /// 随后由前端调用 save_store 把当前内存中的最新内容写入新位置。
 #[tauri::command]
-fn update_settings(
-    app: tauri::AppHandle,
-    settings: Settings,
-) -> Result<ResolvedSettings, String> {
+fn update_settings(app: tauri::AppHandle, settings: Settings) -> Result<ResolvedSettings, String> {
     let mut next = settings;
     next.data_dir = next.data_dir.trim().to_string();
     next.images_dir = next.images_dir.trim().to_string();
     next.theme = next.theme.trim().to_string();
+    next.window_material = normalize_window_material(&next.window_material);
 
     let current = read_settings(&app);
     let (_, current_data_dir, _) = resolve_settings(&app, &current)?;
     let (resolved, data_dir, images_dir) = resolve_settings(&app, &next)?;
 
-    fs::create_dir_all(&data_dir)
-        .map_err(|err| format!("无法创建数据目录：{err}"))?;
-    fs::create_dir_all(&images_dir)
-        .map_err(|err| format!("无法创建图片目录：{err}"))?;
+    fs::create_dir_all(&data_dir).map_err(|err| format!("无法创建数据目录：{err}"))?;
+    fs::create_dir_all(&images_dir).map_err(|err| format!("无法创建图片目录：{err}"))?;
 
     // 可以写文件才视为有效目录，避免选中只读位置。
     let probe = data_dir.join(".notepaper-write-test");
@@ -222,6 +498,12 @@ fn update_settings(
     }
     ensure_builtin_themes(&data_dir)?;
 
+    if current.window_material != next.window_material || current.theme != next.theme {
+        if let Some(window) = app.get_webview_window("main") {
+            let dark = theme_uses_dark(&data_dir, &resolved.theme);
+            apply_window_material(&window, &next.window_material, dark)?;
+        }
+    }
     write_settings(&app, &next)?;
     Ok(resolved)
 }
@@ -283,9 +565,7 @@ fn validate_theme(mut theme: ThemeDefinition) -> Result<ThemeDefinition, String>
 }
 
 fn read_theme(path: &Path) -> Result<ThemeDefinition, String> {
-    let size = fs::metadata(path)
-        .map_err(|err| err.to_string())?
-        .len();
+    let size = fs::metadata(path).map_err(|err| err.to_string())?.len();
     if size > 128 * 1024 {
         return Err("主题文件不能超过 128KB".to_string());
     }
@@ -341,10 +621,12 @@ fn list_themes(app: tauri::AppHandle) -> Result<Vec<ThemeDefinition>, String> {
         if path.extension().and_then(|ext| ext.to_str()) != Some("json") || !path.is_file() {
             continue;
         }
-        let mut theme = read_theme(&path).map_err(|err| {
-            format!("主题文件 {} 无效：{err}", path.display())
-        })?;
-        let file_id = path.file_stem().and_then(|stem| stem.to_str()).unwrap_or("");
+        let mut theme =
+            read_theme(&path).map_err(|err| format!("主题文件 {} 无效：{err}", path.display()))?;
+        let file_id = path
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .unwrap_or("");
         if file_id != theme.id {
             return Err(format!("主题文件名应与 id 一致：{}", path.display()));
         }
@@ -646,9 +928,7 @@ fn export_backup(app: tauri::AppHandle, target: String) -> Result<String, String
             .start_file(&name, options)
             .map_err(|err| err.to_string())?;
         let bytes = fs::read(&path).map_err(|err| err.to_string())?;
-        writer
-            .write_all(&bytes)
-            .map_err(|err| err.to_string())?;
+        writer.write_all(&bytes).map_err(|err| err.to_string())?;
     }
 
     writer.finish().map_err(|err| err.to_string())?;
@@ -662,7 +942,8 @@ fn import_backup(app: tauri::AppHandle, source: String) -> Result<usize, String>
     let (_, data_dir, _) = resolve_settings(&app, &settings)?;
 
     let file = fs::File::open(&source).map_err(|err| format!("无法打开备份：{err}"))?;
-    let mut archive = zip::ZipArchive::new(file).map_err(|err| format!("不是有效的 zip 备份：{err}"))?;
+    let mut archive =
+        zip::ZipArchive::new(file).map_err(|err| format!("不是有效的 zip 备份：{err}"))?;
 
     let mut data_bytes: Option<Vec<u8>> = None;
     for index in 0..archive.len() {
@@ -684,7 +965,8 @@ fn import_backup(app: tauri::AppHandle, source: String) -> Result<usize, String>
     }
 
     let data_bytes = data_bytes.ok_or_else(|| "备份中缺少 data.json".to_string())?;
-    serde_json::from_slice::<Store>(&data_bytes).map_err(|err| format!("备份数据格式错误：{err}"))?;
+    serde_json::from_slice::<Store>(&data_bytes)
+        .map_err(|err| format!("备份数据格式错误：{err}"))?;
 
     fs::create_dir_all(&data_dir).map_err(|err| err.to_string())?;
     let data_file = data_dir.join("data.json");
@@ -713,8 +995,7 @@ fn import_backup(app: tauri::AppHandle, source: String) -> Result<usize, String>
         if let Some(parent) = target.parent() {
             fs::create_dir_all(parent).map_err(|err| err.to_string())?;
         }
-        let mut output =
-            fs::File::create(&target).map_err(|err| format!("写入失败：{err}"))?;
+        let mut output = fs::File::create(&target).map_err(|err| format!("写入失败：{err}"))?;
         std::io::copy(&mut entry, &mut output).map_err(|err| err.to_string())?;
         count += 1;
     }
@@ -798,12 +1079,31 @@ pub fn run() {
     tauri::Builder::default()
         .register_uri_scheme_protocol("notepaper", |_ctx, request| serve_local_file(request))
         .setup(|app| {
-            if read_settings(app.handle()).always_on_top {
-                if let Some(window) = app.get_webview_window("main") {
+            if let Some(window) = app.get_webview_window("main") {
+                restore_window_state(&window);
+                if let Err(error) = configure_window_frame(&window) {
+                    eprintln!("应用窗口圆角失败：{error}");
+                }
+                let settings = read_settings(app.handle());
+                let dark = resolve_settings(app.handle(), &settings)
+                    .map(|(resolved, data_dir, _)| theme_uses_dark(&data_dir, &resolved.theme))
+                    .unwrap_or(false);
+                if let Err(error) = apply_window_material(&window, &settings.window_material, dark)
+                {
+                    eprintln!("应用窗口材质失败：{error}");
+                }
+                if settings.always_on_top {
                     let _ = window.set_always_on_top(true);
                 }
             }
             Ok(())
+        })
+        .on_window_event(|window, event| {
+            if matches!(event, tauri::WindowEvent::CloseRequested { .. }) {
+                if let Err(error) = save_window_state(window) {
+                    eprintln!("{error}");
+                }
+            }
         })
         .invoke_handler(tauri::generate_handler![
             get_settings,

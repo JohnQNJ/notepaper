@@ -111,7 +111,8 @@ notepaper/
   "dataDir": "",        // 空字符串 = 使用默认应用数据目录
   "imagesDir": "",      // 空字符串 = <数据目录>/images
   "alwaysOnTop": false,
-  "theme": "sakura"     // 当前主题 ID；空值按 sakura 处理
+  "theme": "sakura",   // 当前主题 ID；空值按 sakura 处理
+  "windowMaterial": "none" // auto / none / mica / acrylic / micaAlt
 }
 ```
 
@@ -125,6 +126,7 @@ notepaper/
 data_dir   = settings.dataDir 为空 ? app_data_dir() : PathBuf(settings.dataDir)
 images_dir = settings.imagesDir 为空 ? data_dir/images : PathBuf(settings.imagesDir)
 theme      = settings.theme 为空 ? "sakura" : settings.theme.trim()
+material   = auto / mica / acrylic / micaAlt 原样保留，其他值归一为 none
 ```
 
 - **默认值语义**：设置中保存空字符串表示"跟随默认"，因此数据目录变化时，默认图片目录会自动跟随
@@ -144,7 +146,7 @@ theme      = settings.theme 为空 ? "sakura" : settings.theme.trim()
 | 命令 | 参数 | 返回 | 说明 |
 | --- | --- | --- | --- |
 | `get_settings` | — | `ResolvedSettings` | 读取设置并返回解析后的绝对路径，同时确保目录存在 |
-| `update_settings` | `settings: Settings` | `ResolvedSettings` | 校验目录可写、迁移 data.json 与主题、写 settings.json |
+| `update_settings` | `settings: Settings` | `ResolvedSettings` | 校验目录可写、迁移数据、按需应用 DWM 材质与原生明暗、写 settings.json |
 | `list_themes` | — | `ThemeDefinition[]` | 确保内置主题存在，读取并校验数据目录 `themes/*.json` |
 | `export_theme` | `id: string, target: string` | `string` | 将当前数据目录中的指定主题导出为 JSON |
 | `import_theme` | `source: string` | `ThemeDefinition` | 校验并导入 JSON 到 `themes/<id>.json` |
@@ -177,6 +179,7 @@ interface ResolvedSettings {
   imagesDir: string;
   alwaysOnTop: boolean;
   theme: string;   // 当前主题 ID，内置或自定义
+  windowMaterial: string; // auto / none / mica / acrylic / micaAlt
 }
 ```
 
@@ -196,7 +199,7 @@ interface ResolvedSettings {
       "minWidth": 320, "minHeight": 460,
       "decorations": false,
       "transparent": true,
-      "shadow": false,
+      "shadow": true,
       "resizable": true,
       "center": true
     }],
@@ -216,7 +219,30 @@ interface ResolvedSettings {
 - `core:window:allow-minimize`
 - `core:window:allow-set-always-on-top`
 
-圆角与透明：窗口本身是矩形透明区域，视觉圆角由 `.app { border-radius: 18px; overflow: hidden; }` 完成。
+阴影、圆角与透明：Tauri `shadow: true` 启用 DWM 原生阴影；Windows 11 启动时设置 `DWMWA_WINDOW_CORNER_PREFERENCE = 33` 为 `DWMWCP_ROUND = 2`，让系统背景、窗口边框和阴影使用一致的圆角边界。WebView 的 `.app` 使用匹配的 `8px` 圆角和 `overflow: hidden`，不再绘制会被窗口边缘裁掉的整窗 CSS 阴影；旧系统保留 CSS 圆角回退。
+
+窗口材质由 Rust 按系统构建号选择实现：
+
+- Windows 11 Build 22523 及以上直接写 `DWMWA_SYSTEMBACKDROP_TYPE = 38`，映射 `auto/none/mica/acrylic/micaAlt` 为 `0/1/2/3/4`；同时按主题 `colorScheme` 写 `DWMWA_USE_IMMERSIVE_DARK_MODE = 20`，避免 DWM 与 WebView 明暗不一致
+- 初版 Windows 11 使用 Tauri `Effect::Mica`；Windows 10 Build 17763 及以上回退到 Acrylic；更早版本回退到 Blur
+- 新系统不再与排队执行的 `set_effects(None)` 混用；旧系统每次切换只走 `set_effects()`
+- 材质非 `none` 时，`html`、`body`、`.app` 与 `.settings-pane` 保持透明；`none` 恢复主题渐变。设置打开时用 `body.settings-open` 隐藏底层笔记/待办，避免透明背景造成内容重叠。窗口不提供背景图片或全窗图片叠加层
+- 启动、切换材质和切换主题都会同步原生状态；原生调用成功后才保存设置。完整调研与验证说明见 `docs/WINDOW_MATERIALS.md`
+
+窗口状态由 Rust 原生事件持久化，独立于用户设置与数据备份：
+
+- `CloseRequested` 时读取 `outer_position()` 与 `inner_size()`，以物理像素写入应用数据目录的 `window.json`；最小化时跳过保存，避免记录无效坐标
+- 启动 `setup` 阶段恢复内层大小和外框位置；首次运行或文件无效时沿用 `tauri.conf.json` 的默认尺寸与居中配置
+- 恢复前检查窗口中心是否位于任一当前可用显示器内；原显示器断开时保留上次大小并重新居中，避免窗口落到屏幕外
+
+```json
+{
+  "x": 177,
+  "y": 133,
+  "width": 477,
+  "height": 711
+}
+```
 
 ## 8. 自定义图片协议
 
@@ -295,8 +321,9 @@ state = { notes, todos, activeNote, settings }
 - 目录选择：`pick_folder` → `update_settings` → 若成功则 `saveNow()` 并提示
 - 打开目录：`open_folder({ path })`
 - 置顶开关与标题栏图钉共用 `applyAlwaysOnTop()`，并持久化 `alwaysOnTop`
-- 主题项点击后立即调用 `applyTheme()` 并 `updateSettings({ theme })` 持久化，选中态由 `renderSettings()` 维护
-- 启动时 Rust `setup` 读取 settings，若 `alwaysOnTop` 为真则直接置顶；前端启动后再同步按钮状态
+- 主题项点击后立即调用 `applyTheme()` 并 `updateSettings({ theme })` 持久化，选中态由 `renderSettings()` 维护；Rust 同时更新原生窗口明暗
+- 材质下拉框通过 `updateSettings({ windowMaterial })` 应用并持久化，前端以 `data-window-material` 控制整窗背景是否透明
+- 启动时 Rust `setup` 读取 settings，恢复窗口材质和原生明暗；若 `alwaysOnTop` 为真则直接置顶，前端启动后再同步按钮状态
 
 ### 9.6 相对路径与旧数据迁移
 
@@ -335,7 +362,7 @@ notepaper-backup-YYYY-MM-DD.zip
 - `loadThemes()` 通过 IPC 获取主题；读取失败时回退到 `FALLBACK_THEMES`，即 `styles.css` 中的四套 CSS 主题
 - `applyTheme()` 先移除根元素上的旧内联变量，再用 `style.setProperty()` 写入当前 JSON 变量，同时设置 `documentElement.dataset.theme` 与 `style.colorScheme`。未覆盖的自定义变量继承 `:root` 粉樱默认值，CSS 同名主题则作为读取失败时的回退
 - 变量分三类：界面配色、字体（`--ui-font` / `--preview-font` / `--mono-font`）、代码块与 `--token-*` 高亮色
-- 设置页用 `createElement` / `textContent` 动态生成主题按钮，并在 `#themeList` 上使用点击事件委托；选择后 `updateSettings({ theme })` 只持久化主题 ID 到 `settings.json`
+- 设置页用 `createElement` / `textContent` 动态生成主题按钮，并在 `#themeList` 上使用点击事件委托；选择后 `updateSettings({ theme })` 持久化主题 ID，并把 `colorScheme` 同步到 DWM 原生窗口明暗
 - `export_theme` / `import_theme` 支持单文件迁移；数据备份包含整个 `themes/**`。切换数据目录、导入备份和重新打开设置页时都会重新加载主题
 - 完整 JSON 格式与可编辑变量见 `docs/THEMES.md`
 
@@ -361,6 +388,8 @@ notepaper-backup-YYYY-MM-DD.zip
 
 ## 10. 构建与打包
 
+开发调试、WebView2 CDP、DWM 属性读取、Windows 真实截图和持久化验证方法见 `docs/DEBUGGING.md`。
+
 ```powershell
 npm install      # 安装 @tauri-apps/cli
 npm run dev      # tauri dev
@@ -375,8 +404,8 @@ npm run build    # tauri build
 产物：
 
 ```
-src-tauri/target/release/bundle/nsis/notepaper_0.1.0_x64-setup.exe
-src-tauri/target/release/bundle/msi/notepaper_0.1.0_x64_en-US.msi
+src-tauri/target/release/bundle/nsis/notepaper_0.2.0_x64-setup.exe
+src-tauri/target/release/bundle/msi/notepaper_0.2.0_x64_en-US.msi
 src-tauri/target/release/notepaper.exe
 ```
 
