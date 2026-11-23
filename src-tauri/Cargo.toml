@@ -1,0 +1,36 @@
+[package]
+name = "notepaper"
+version = "0.1.0"
+description = "A tiny sticky note app built with Tauri + Rust"
+authors = ["notepaper"]
+edition = "2021"
+
+[lib]
+name = "notepaper_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["protocol-asset"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+base64 = "0.22"
+percent-encoding = "2"
+rfd = "0.15"
+zip = { version = "2", default-features = false, features = ["deflate"] }
+
+# 开发构建：自身代码轻度优化，依赖全量优化，显著加快 `tauri dev` 的启动与运行速度
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 2
+
+[profile.release]
+strip = true
+lto = true
+codegen-units = 1
+opt-level = "s"
+panic = "abort"

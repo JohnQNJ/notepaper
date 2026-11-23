@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>小便签</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app">
+      <header class="titlebar">
+        <div class="drag-area" data-tauri-drag-region>
+          <span class="app-dot" data-tauri-drag-region></span>
+          <span class="app-name" data-tauri-drag-region>小便签</span>
+        </div>
+        <div class="win-actions">
+          <button id="settingsBtn" class="icon-btn" title="设置">
+            <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 13.6a7.6 7.6 0 0 0 0-3.2l1.7-1.3-1.9-3.3-2 .8a7.6 7.6 0 0 0-2.8-1.6L14 3h-4l-.4 2a7.6 7.6 0 0 0-2.8 1.6l-2-.8-1.9 3.3 1.7 1.3a7.6 7.6 0 0 0 0 3.2l-1.7 1.3 1.9 3.3 2-.8a7.6 7.6 0 0 0 2.8 1.6l.4 2h4l.4-2a7.6 7.6 0 0 0 2.8-1.6l2 .8 1.9-3.3Z"/></svg>
+          </button>
+          <button id="pinBtn" class="icon-btn" title="窗口置顶">
+            <svg viewBox="0 0 24 24"><path d="M9 3h6l-1 6 3 3v2H7v-2l3-3-1-6Z"/><path d="M12 14v7"/></svg>
+          </button>
+          <button id="minBtn" class="icon-btn" title="最小化">
+            <svg viewBox="0 0 24 24"><path d="M6 12h12"/></svg>
+          </button>
+          <button id="closeBtn" class="icon-btn" title="关闭">
+            <svg viewBox="0 0 24 24"><path d="M7 7l10 10M17 7 7 17"/></svg>
+          </button>
+        </div>
+      </header>
+
+      <nav class="tabs">
+        <button class="tab" data-tab="todo">待办</button>
+        <button class="tab active" data-tab="note">笔记</button>
+      </nav>
+
+      <main class="panes">
+        <section id="notePane" class="pane">
+          <div class="toolbar">
+            <button id="listBtn" class="chip-btn" title="全部笔记">
+              <svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/></svg>
+            </button>
+            <span class="meta">
+              <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/></svg>
+              <span id="updatedAt">修改于：—</span>
+            </span>
+            <button id="editBtn" class="chip-btn" title="编辑 / 预览">
+              <svg viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16v4Z"/><path d="M13.5 6.5l4 4"/></svg>
+            </button>
+            <button id="deleteBtn" class="chip-btn" title="删除当前笔记">
+              <svg viewBox="0 0 24 24"><path d="M4 7h16M9 7V5h6v2M7 7l1 13h8l1-13M10 11v6M14 11v6"/></svg>
+            </button>
+          </div>
+
+          <div id="noteList" class="note-list hidden"></div>
+
+          <div class="note-head">
+            <input id="noteTitle" class="note-title" placeholder="未命名笔记" spellcheck="false" />
+            <div class="accent"></div>
+          </div>
+
+          <div class="note-body">
+            <div id="preview" class="preview"></div>
+            <textarea id="editor" class="editor hidden" spellcheck="false" placeholder="支持 Markdown：**粗体**、*斜体*、~~删除线~~、# 标题、`代码`、> 引用、表格…"></textarea>
+          </div>
+
+          <div class="foot-hint">
+            <span id="hint">双击正文开始编辑 · Ctrl+V 粘贴截图</span>
+            <span id="charCount">0 字</span>
+          </div>
+        </section>
+
+        <section id="todoPane" class="pane hidden">
+          <div class="todo-head">
+            <span class="todo-title">今日待办</span>
+            <span id="todoProgress" class="todo-progress">0 / 0</span>
+          </div>
+          <form id="todoForm" class="todo-form">
+            <input id="todoInput" placeholder="添加一条待办，回车保存" maxlength="120" autocomplete="off" />
+            <button type="submit" title="添加">＋</button>
+          </form>
+          <div id="todoList" class="todo-list"></div>
+          <div class="foot-hint">
+            <span>点击圆圈标记完成</span>
+            <span id="todoLeft">共 0 条</span>
+          </div>
+        </section>
+
+        <section id="settingsPane" class="settings-pane hidden">
+          <div class="settings-scroll">
+            <div class="settings-hero">
+              <div>
+                <div class="settings-title">设置</div>
+                <div class="settings-sub">本地存储 · 完全离线</div>
+              </div>
+              <button id="settingsClose" class="chip-btn" title="返回笔记">
+                <svg viewBox="0 0 24 24"><path d="M7 7l10 10M17 7 7 17"/></svg>
+              </button>
+            </div>
+
+            <div class="setting-card">
+              <div class="setting-label">主题</div>
+              <div class="setting-desc">主题以 JSON 保存在数据目录的 themes 文件夹中，可直接编辑，也会随数据备份一起导入导出。</div>
+              <div id="themeList" class="theme-grid"></div>
+              <div class="setting-actions">
+                <button id="importTheme" class="btn-soft">导入主题</button>
+                <button id="exportTheme" class="btn-soft">导出当前主题</button>
+              </div>
+            </div>
+
+            <div class="setting-card">
+              <div class="setting-label">数据存储位置</div>
+              <div class="setting-desc">笔记与待办以 data.json 保存在此目录，切换时会自动迁移已有数据。</div>
+              <div id="dataDirText" class="setting-path">—</div>
+              <div class="setting-actions">
+                <button id="dataDirPick" class="btn-soft">更改目录</button>
+                <button id="dataDirOpen" class="btn-soft">打开目录</button>
+              </div>
+            </div>
+
+            <div class="setting-card">
+              <div class="setting-label">图片存储位置</div>
+              <div class="setting-desc">Ctrl+V 粘贴的截图保存到此目录，默认位于数据目录下的 images；放在数据目录内才会随备份导出。</div>
+              <div id="imagesDirText" class="setting-path">—</div>
+              <div class="setting-actions">
+                <button id="imagesDirPick" class="btn-soft">更改目录</button>
+                <button id="imagesDirOpen" class="btn-soft">打开目录</button>
+              </div>
+            </div>
+
+            <div class="setting-card setting-inline">
+              <div class="setting-text">
+                <div class="setting-label">启动时窗口置顶</div>
+                <div class="setting-desc">让便签始终浮在其他窗口之上。</div>
+              </div>
+              <button id="alwaysOnTopToggle" class="switch" role="switch" aria-checked="false" title="切换置顶">
+                <i></i>
+              </button>
+            </div>
+
+            <div class="setting-card">
+              <div class="setting-label">数据备份</div>
+              <div class="setting-desc">导出 data.json 与数据目录内的图片为 zip；导入会覆盖当前数据，并自动保留 data.json.bak。</div>
+              <div class="setting-actions">
+                <button id="exportBackup" class="btn-soft">导出备份</button>
+                <button id="importBackup" class="btn-soft">导入备份</button>
+              </div>
+            </div>
+
+            <div class="settings-bottom">
+              <button id="resetDirs" class="link-btn">恢复默认路径</button>
+              <span class="settings-version">小便签 v0.1.0</span>
+            </div>
+            <div id="settingsMsg" class="settings-msg"></div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script src="main.js"></script>
+  </body>
+</html>

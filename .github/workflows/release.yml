@@ -1,0 +1,55 @@
+name: Build and release Windows binaries
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: Release tag (for example v0.1.0)
+        required: true
+        default: v0.1.0
+        type: string
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build Tauri application
+        run: npm run build
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.tag_name || github.ref_name }}
+          name: ${{ inputs.tag_name || github.ref_name }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: |
+            src-tauri/target/release/notepaper.exe
+            src-tauri/target/release/bundle/nsis/notepaper_*_x64-setup.exe
+            src-tauri/target/release/bundle/msi/notepaper_*_x64_en-US.msi
